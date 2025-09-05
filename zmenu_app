@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Get a list of executables from the PATH, feed them into zmenu,
+# and execute the one chosen by the user.
+#chosen=$(ls -1 /bin /usr/bin /usr/local/bin | sort -u | ./zmenu)
+
+# USE FOR TEST
+chosen=$(ls -1 | sort -u | ./zmenu)
+# valgrind mode
+#chosen=$(ls -1 | sort -u | valgrind --leak-check=full ./zmenu)
+echo -e "$chosen"
+# USE FOR TEST
+
+# Run the chosen command in the background
+#[ -n "$chosen" ] && "$chosen" &
