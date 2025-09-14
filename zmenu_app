@@ -5,10 +5,15 @@
 #chosen=$(ls -1 /bin /usr/bin /usr/local/bin | sort -u | ./zmenu)
 
 # USE FOR TEST
-chosen=$(ls -1 | sort -u | ./zmenu)
+#chosen=$(ls -1 | sort -u | ./zmenu)
+
 # valgrind mode
-#chosen=$(ls -1 | sort -u | valgrind --leak-check=full ./zmenu)
-echo -e "$chosen"
+#chosen=$(ls -1 | sort -u | valgrind --show-leak-kinds=all ./zmenu)
+
+# GDB
+gdb -ex "run < <(ls -1 | sort -u)" ./zmenu
+
+#echo -e "$chosen"
 # USE FOR TEST
 
 # Run the chosen command in the background

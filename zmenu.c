@@ -58,9 +58,7 @@ struct Item { char *text; };
 static Item items[BUFSIZ];
 
 static char inputBuffer[BUFSIZ] = "";
-static int inputLen = 0;
-static int numItems = 0;
-static int selindex = 0;
+static int selIndex = 0;
 
 // Xft
 static XftDraw *draw;
@@ -122,7 +120,7 @@ static int position(int user, int wh)
 // Frees all the resources
 static void cleanup(void) 
 {
-    for (int i = 0; i < numItems; i++) 
+    for (int i = 0; items[i].text != NULL; i++)
         free(items[i].text);
 
     XftDrawDestroy(draw);
@@ -141,33 +139,109 @@ static void cleanup(void)
 static void readStdin(void)
 {
     char *line = NULL;
-    size_t len = 0;
-    ssize_t read;
+    size_t lineSize = 0;
+    ssize_t len;
 
-    while ((read = getline(&line, &len, stdin)) != -1)
+    for (int i = 0; (len = getline(&line, &lineSize, stdin)) != -1; i++)
     {
-        if (line[read - 1] == '\n')
-            line[read - 1] = '\0';
-
-        items[numItems].text = strdup(line);
-        numItems++;
+        if (line[len - 1] == '\n')
+            line[len - 1] = '\0';
+        
+        if (!(items[i].text = strdup(line)))
+            printError("strdup", true);
     }
     free(line);
 }
 
+// Draw the menu
 static void drawMenu(void)
 {
-    int textx = 10;
-    int texty = 10;
+    XGlyphInfo ext;
+    int textWidht, textx, texty;
 
+    //magic numbers
+    texty = (HEIGHT + ((font->ascent + font->descent) / 2)) / 2;
+    textx = (font->ascent + font->descent) / 4;
+    
     // Draw the inputBuffer
-    XftDrawStringUtf8(draw, &fg, font, textx, texty, (XftChar8 *)inputBuffer, sizeof(inputBuffer));
+    snprintf(inputBuffer, sizeof(inputBuffer), "%s ", PROMPT);
+    XftTextExtentsUtf8(dp, font, (XftChar8 *)inputBuffer, strlen(inputBuffer), &ext);
+    
+    textWidht = ext.xOff;
+    
+    XftDrawStringUtf8(draw, &fg, font, textx, texty, (XftChar8 *)inputBuffer, strlen(inputBuffer));
 
+    // Magic number
+    textx += textWidht + 5;
+    for (int i = 0; items[i].text != NULL; i++) 
+    {
+        if (textx >= WIDTH)
+            break;
+
+        XftTextExtentsUtf8(dp, font, (XftChar8 *)items[i].text, strlen(items[i].text), &ext);
+        
+        // Magic number
+        textWidht = ext.xOff + 10;
+
+        if (strcmp(items[i].text, items[selIndex].text) != 0)
+        {
+            XSetForeground(dp, gc, bgh);
+            XFillRectangle(dp, win, gc, textx, 0, textWidht, HEIGHT);
+            // magic number
+            XftDrawStringUtf8(draw, &fgh, font, textx + 5, texty, (XftChar8 *)items[i].text, 
+                              strlen(items[i].text));
+        }
+        else 
+        {
+            // Magic number
+            XftDrawStringUtf8(draw, &fg, font, textx + 5, texty, (XftChar8 *)items[i].text, 
+                              strlen(items[i].text));
+        }
+        textx += textWidht;
+    }
+    XFlush(dp);
 }
 
+// Handles especial keys 
 static void keysHandler(void)
 {
+    KeySym ksym = XKeycodeToKeysym(dp, (KeyCode)ev.xkey.keycode, 0);
 
+    switch (ksym)
+    {
+        case XK_Escape:
+        {
+            cleanup();
+            running = false;
+            break;
+        }
+        case XK_Return:
+        {
+            printf("items[%d].text = %s\n", selIndex, items[selIndex].text);
+            //findMatch();
+            break;
+        }
+        case XK_Tab:
+        {
+            int i;
+            for (i = 0; items[i].text != NULL; i++);
+            if (ev.xkey.state != ShiftMask)
+            {
+                if (selIndex == i)
+                    return;
+                else
+                    selIndex++;
+            }
+            else
+            {
+                if (selIndex == 0)
+                    return;
+                else
+                    selIndex--;
+            }
+            drawMenu();
+        }
+    }
 }
 
 // Manages window attributes
@@ -183,6 +257,7 @@ static void winSetup(void)
 
     win = XCreateWindow(dp, rt, wx, wy, WIDTH, HEIGHT, 0, DefaultDepth(dp, sc), CopyFromParent, 
                         visual, CWOverrideRedirect | CWBackPixel | CWEventMask, &wa);
+
 }
 
 // Initialize variables
@@ -197,9 +272,9 @@ static void setup(void)
     bgh = getColor(BGH);
 
     winSetup();
-
+ 
     gc = XCreateGC(dp, win, 0, NULL);
-    XSetForeground(dp, gc, bgh);
+    XSetForeground(dp, gc, bg);
     
     if (!(font = XftFontOpenName(dp, sc, FONT)))
         printError("Cannot load font", true);
@@ -209,7 +284,7 @@ static void setup(void)
     XftColorAllocName(dp, visual, colormap, FGH, &fgh);
 
     XMapRaised(dp, win);
-    //XGrabKeyboard(dp, rt, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+    XGrabKeyboard(dp, rt, True, GrabModeAsync, GrabModeAsync, CurrentTime);
     XFlush(dp);
 }
 
@@ -218,10 +293,13 @@ int main(void)
     if (!(dp = XOpenDisplay(NULL)))
         printError("Cannot open display", true);
 
+    readStdin();
+ 
     setup();
 
     while (running)
     {
+        XNextEvent(dp, &ev);
         switch (ev.type) 
         {
             case Expose:
@@ -232,8 +310,5 @@ int main(void)
                 break;
         }
     }
-    
-    cleanup();
-
     return 0;
 }
