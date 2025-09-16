@@ -19,23 +19,20 @@ static const char *PROMPT = ">> ";
 
 // Background color
 static const char *BG = "#1d2021";
+// Background highlighted color
+static const char *BGH = "#b8bb26";
 // Foreground color
 static const char *FG = "#ebdbb2";
-// Background highlighted color
-static const char *BGH = "#ebdbb2";
-// Foreground highlighted color
-static const char *FGH = "#1d2021";
-//static const char *BGH = "#282828";
-//static const char *FGH = "#b8bb26";
 
 // Window width
-static const int WIDTH = 400;
+static const int WIDTH = 500;
 // Window height
 static const int HEIGHT = 40;
 // -1 = Left | 0 = Center | 1 = Right
 static  const int PX = 0;
 // -1 = Top | 0 = Center | 1 = Bottom
 static const int PY = 0;
+
 ////////// USER CONFIG //////////
 
 // Globals //
@@ -63,14 +60,12 @@ static int selIndex = 0;
 // Xft
 static XftDraw *draw;
 static XftFont *font;
-static XftColor fg, fgh;
+static XftColor xftfg;
 
 
 //// CODE STARTS HERE ////
 
-// Prints an error to stderr, given the arguments:
-// errorName, the name of the error and checkExit
-// if want to call exit
+// Prints customs errors to stderr
 static void printError(const char errorName[], bool checkExit) 
 {
     fprintf(stderr, "zmenu error: %s.\n", errorName);
@@ -79,7 +74,6 @@ static void printError(const char errorName[], bool checkExit)
 }
 
 // Allocates a color in unsigned long format
-// given the argument hex, and hex color code
 static unsigned long getColor(const char *hex) 
 {
     XColor color;
@@ -88,9 +82,7 @@ static unsigned long getColor(const char *hex)
     return color.pixel;
 }
 
-// Return the position, given the arguments:
-// int user, the user wanted positon, and
-// int wh, the size of the window (width or height)
+// Handle the position of the menu
 static int position(int user, int wh)
 {
     int axis;
@@ -124,8 +116,7 @@ static void cleanup(void)
         free(items[i].text);
 
     XftDrawDestroy(draw);
-    XftColorFree(dp, visual, colormap, &fg);
-    XftColorFree(dp, visual, colormap, &fgh);
+    XftColorFree(dp, visual, colormap, &xftfg);
     XftFontClose(dp, font);
 
     XUngrabKeyboard(dp, CurrentTime);
@@ -134,8 +125,7 @@ static void cleanup(void)
     XCloseDisplay(dp);
 }
 
-// Read the stdin separes it into lines
-// and adds it to the array of items
+// Read the stdin text and allocates it
 static void readStdin(void)
 {
     char *line = NULL;
@@ -153,50 +143,47 @@ static void readStdin(void)
     free(line);
 }
 
-// Draw the menu
+// Filter items
+
+// Draw the menu items
 static void drawMenu(void)
 {
     XGlyphInfo ext;
-    int textWidht, textx, texty;
+    int textWidht, textx, texty, padding;
 
-    //magic numbers
     texty = (HEIGHT + ((font->ascent + font->descent) / 2)) / 2;
     textx = (font->ascent + font->descent) / 4;
+    padding = 5;
     
-    // Draw the inputBuffer
-    snprintf(inputBuffer, sizeof(inputBuffer), "%s ", PROMPT);
+    XClearWindow(dp, win);
+
     XftTextExtentsUtf8(dp, font, (XftChar8 *)inputBuffer, strlen(inputBuffer), &ext);
-    
+
     textWidht = ext.xOff;
     
-    XftDrawStringUtf8(draw, &fg, font, textx, texty, (XftChar8 *)inputBuffer, strlen(inputBuffer));
+    XftDrawStringUtf8(draw, &xftfg, font, textx, texty, (XftChar8 *)inputBuffer, strlen(inputBuffer));
 
-    // Magic number
-    textx += textWidht + 5;
+    textx += textWidht + padding;
+
     for (int i = 0; items[i].text != NULL; i++) 
     {
+        if (items[i].text == NULL)
+            break;
+        
         if (textx >= WIDTH)
             break;
 
         XftTextExtentsUtf8(dp, font, (XftChar8 *)items[i].text, strlen(items[i].text), &ext);
         
-        // Magic number
-        textWidht = ext.xOff + 10;
+        textWidht = ext.xOff + (padding * 2);
 
-        if (strcmp(items[i].text, items[selIndex].text) != 0)
+        if (strcmp(items[i].text, items[selIndex].text) == 0)
         {
             XSetForeground(dp, gc, bgh);
             XFillRectangle(dp, win, gc, textx, 0, textWidht, HEIGHT);
-            // magic number
-            XftDrawStringUtf8(draw, &fgh, font, textx + 5, texty, (XftChar8 *)items[i].text, 
-                              strlen(items[i].text));
         }
-        else 
-        {
-            // Magic number
-            XftDrawStringUtf8(draw, &fg, font, textx + 5, texty, (XftChar8 *)items[i].text, 
+            XftDrawStringUtf8(draw, &xftfg, font, textx + padding, texty, (XftChar8 *)items[i].text,
                               strlen(items[i].text));
-        }
         textx += textWidht;
     }
     XFlush(dp);
@@ -206,42 +193,51 @@ static void drawMenu(void)
 static void keysHandler(void)
 {
     KeySym ksym = XKeycodeToKeysym(dp, (KeyCode)ev.xkey.keycode, 0);
+    char buf[16] = "";
+    unsigned int inputLen = strlen(inputBuffer);
+
+    XLookupString(&ev.xkey, buf, sizeof(buf), &ksym, NULL);
 
     switch (ksym)
     {
         case XK_Escape:
-        {
-            cleanup();
             running = false;
             break;
-        }
         case XK_Return:
-        {
-            printf("items[%d].text = %s\n", selIndex, items[selIndex].text);
-            //findMatch();
+            printf("%s\n", items[selIndex].text);
+            running = false;
             break;
-        }
+        case XK_BackSpace:
+            if (inputLen > strlen(PROMPT))
+                inputBuffer[--inputLen] = '\0';
+            break;
         case XK_Tab:
         {
-            int i;
-            for (i = 0; items[i].text != NULL; i++);
-            if (ev.xkey.state != ShiftMask)
-            {
-                if (selIndex == i)
-                    return;
-                else
-                    selIndex++;
-            }
-            else
-            {
-                if (selIndex == 0)
-                    return;
-                else
+            int index;
+            for (index = 0; items[index].text != NULL; index++);
+            
+            if (index == 0)
+                break;
+
+            if (ev.xkey.state & ShiftMask)
+                if (selIndex != 0)
                     selIndex--;
-            }
-            drawMenu();
+                else
+                    selIndex = 0;
+            else
+                if (selIndex != --index)
+                    selIndex++;
+                else
+                    selIndex = index;
+            printf("item[%d].text = %s\n\n", selIndex, items[selIndex].text);
+            break;
         }
+        default:
+            if (strlen(buf) == 1 && inputLen < sizeof(inputBuffer) - 1) 
+                strcat(inputBuffer, buf);
+            break;
     }
+    drawMenu();
 }
 
 // Manages window attributes
@@ -268,6 +264,8 @@ static void setup(void)
     visual = DefaultVisual(dp, sc);
     colormap = DefaultColormap(dp, sc);
     
+    snprintf(inputBuffer, sizeof(inputBuffer), "%s", PROMPT);
+    
     bg = getColor(BG);
     bgh = getColor(BGH);
 
@@ -275,20 +273,20 @@ static void setup(void)
  
     gc = XCreateGC(dp, win, 0, NULL);
     XSetForeground(dp, gc, bg);
+    XFillRectangle(dp, win, gc, wx, wy, WIDTH, HEIGHT);
     
     if (!(font = XftFontOpenName(dp, sc, FONT)))
         printError("Cannot load font", true);
 
     draw = XftDrawCreate(dp, win, visual, colormap);
-    XftColorAllocName(dp, visual, colormap, FG, &fg);
-    XftColorAllocName(dp, visual, colormap, FGH, &fgh);
+    XftColorAllocName(dp, visual, colormap, FG, &xftfg);
 
     XMapRaised(dp, win);
     XGrabKeyboard(dp, rt, True, GrabModeAsync, GrabModeAsync, CurrentTime);
     XFlush(dp);
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
     if (!(dp = XOpenDisplay(NULL)))
         printError("Cannot open display", true);
@@ -310,5 +308,6 @@ int main(void)
                 break;
         }
     }
+    cleanup();
     return 0;
 }
