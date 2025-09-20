@@ -246,7 +246,6 @@ static void setup(void)
  
     gc = XCreateGC(dp, win, 0, NULL);
     XSetForeground(dp, gc, bg);
-    XFillRectangle(dp, win, gc, wx, wy, WIDTH, HEIGHT);
     
     if (!(font = XftFontOpenName(dp, sc, FONT)))
         printError("Cannot load font", true);
@@ -267,6 +266,8 @@ int main(void)
     readStdin();
  
     setup();
+    
+    match();
 
     while (running)
     {
