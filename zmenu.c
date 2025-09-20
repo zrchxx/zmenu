@@ -25,13 +25,9 @@ static const char *BGH = "#b8bb26";
 static const char *FG = "#ebdbb2";
 
 // Window width
-static const int WIDTH = 500;
+static const int WIDTH = 600;
 // Window height
 static const int HEIGHT = 40;
-// -1 = Left | 0 = Center | 1 = Right
-static  const int PX = 0;
-// -1 = Top | 0 = Center | 1 = Bottom
-static const int PY = 0;
 
 ////////// USER CONFIG //////////
 
@@ -46,13 +42,13 @@ static Visual *visual;
 static Colormap colormap;
 static XEvent ev;
 static unsigned long bg, bgh;
-static int wx, wy;
 static bool running = true;
 
 // Items list
 typedef struct Item Item;
 struct Item { char *text; };
 static Item items[BUFSIZ];
+static Item itemsMatch[BUFSIZ];
 
 static char inputBuffer[BUFSIZ] = "";
 static int selIndex = 0;
@@ -78,35 +74,8 @@ static unsigned long getColor(const char *hex)
 {
     XColor color;
     if (!XAllocNamedColor(dp, colormap, hex, &color, &color))
-        printError("Cannot allocate color", false);
+        printError("Cannot allocate color", true);
     return color.pixel;
-}
-
-// Handle the position of the menu
-static int position(int user, int wh)
-{
-    int axis;
-    switch (user)
-    {
-        case 1:
-            if (wh != WIDTH)
-                axis = DisplayHeight(dp, sc) - wh;
-            else
-                axis = DisplayWidth(dp, sc) - wh;
-            break;
-        case 0:
-            if (wh != WIDTH)
-                axis = (DisplayHeight(dp, sc) - wh) / 2;
-            else
-                axis = (DisplayWidth(dp, sc) - wh) / 2;
-            break;
-        case -1:
-            axis = 0;
-            break;
-        default:
-            break;
-    }
-    return axis;
 }
 
 // Frees all the resources
@@ -134,16 +103,36 @@ static void readStdin(void)
 
     for (int i = 0; (len = getline(&line, &lineSize, stdin)) != -1; i++)
     {
-        if (line[len - 1] == '\n')
-            line[len - 1] = '\0';
+        if (i < BUFSIZ - 1)
+        {
+            if (line[len - 1] == '\n')
+                line[len - 1] = '\0';
         
-        if (!(items[i].text = strdup(line)))
-            printError("strdup", true);
+            if (!(items[i].text = strdup(line)))
+                printError("strdup", true);
+        }
+        else
+        {
+            items[i].text = NULL;
+            break;
+        }
     }
     free(line);
 }
 
 // Filter items
+static void match(void)
+{
+    int j = 0;
+    char *searchText = inputBuffer + strlen(PROMPT);
+
+    memset(itemsMatch, 0, sizeof(itemsMatch));
+
+    for (int i = 0; items[i].text != NULL; i++)
+        if (!*searchText || strcasestr(items[i].text, searchText))
+            itemsMatch[j++] = items[i];
+    selIndex = 0;
+}
 
 // Draw the menu items
 static void drawMenu(void)
@@ -165,25 +154,22 @@ static void drawMenu(void)
 
     textx += textWidht + padding;
 
-    for (int i = 0; items[i].text != NULL; i++) 
+    for (int i = 0; itemsMatch[i].text != NULL; i++) 
     {
-        if (items[i].text == NULL)
-            break;
-        
         if (textx >= WIDTH)
             break;
 
-        XftTextExtentsUtf8(dp, font, (XftChar8 *)items[i].text, strlen(items[i].text), &ext);
+        XftTextExtentsUtf8(dp, font, (XftChar8 *)itemsMatch[i].text, strlen(itemsMatch[i].text), &ext);
         
         textWidht = ext.xOff + (padding * 2);
 
-        if (strcmp(items[i].text, items[selIndex].text) == 0)
+        if (i == selIndex)
         {
             XSetForeground(dp, gc, bgh);
             XFillRectangle(dp, win, gc, textx, 0, textWidht, HEIGHT);
         }
-            XftDrawStringUtf8(draw, &xftfg, font, textx + padding, texty, (XftChar8 *)items[i].text,
-                              strlen(items[i].text));
+            XftDrawStringUtf8(draw, &xftfg, font, textx + padding, texty, 
+                              (XftChar8 *)itemsMatch[i].text, strlen(itemsMatch[i].text));
         textx += textWidht;
     }
     XFlush(dp);
@@ -204,54 +190,38 @@ static void keysHandler(void)
             running = false;
             break;
         case XK_Return:
-            printf("%s\n", items[selIndex].text);
+            if (itemsMatch[selIndex].text)
+                printf("%s\n", itemsMatch[selIndex].text);
             running = false;
             break;
         case XK_BackSpace:
             if (inputLen > strlen(PROMPT))
+            {
                 inputBuffer[--inputLen] = '\0';
+                match();
+            }
             break;
-        case XK_Tab:
-        {
-            int index;
-            for (index = 0; items[index].text != NULL; index++);
-            
-            if (index == 0)
-                break;
-
-            if (ev.xkey.state & ShiftMask)
-                if (selIndex != 0)
-                    selIndex--;
-                else
-                    selIndex = 0;
-            else
-                if (selIndex != --index)
-                    selIndex++;
-                else
-                    selIndex = index;
-            printf("item[%d].text = %s\n\n", selIndex, items[selIndex].text);
-            break;
-        }
         default:
-            if (strlen(buf) == 1 && inputLen < sizeof(inputBuffer) - 1) 
+            if (strlen(buf) == 1 && inputLen < sizeof(inputBuffer) - 1)
+            {
                 strcat(inputBuffer, buf);
+                match();
+            }
             break;
     }
     drawMenu();
 }
 
 // Manages window attributes
-static void winSetup(void)
+static void winSetup(int x, int y)
 {
     XSetWindowAttributes wa;
-    wx = position(PX, WIDTH);
-    wy = position(PY, HEIGHT);
-
+    
     wa.override_redirect = True;
     wa.background_pixel = bg;
     wa.event_mask = ExposureMask | KeyPressMask;
 
-    win = XCreateWindow(dp, rt, wx, wy, WIDTH, HEIGHT, 0, DefaultDepth(dp, sc), CopyFromParent, 
+    win = XCreateWindow(dp, rt, x, y, WIDTH, HEIGHT, 0, DefaultDepth(dp, sc), CopyFromParent, 
                         visual, CWOverrideRedirect | CWBackPixel | CWEventMask, &wa);
 
 }
@@ -269,7 +239,10 @@ static void setup(void)
     bg = getColor(BG);
     bgh = getColor(BGH);
 
-    winSetup();
+    int wx = (DisplayWidth(dp, sc) - WIDTH) / 2;
+    int wy = (DisplayHeight(dp, sc) - HEIGHT) / 2;
+    
+    winSetup(wx, wy);
  
     gc = XCreateGC(dp, win, 0, NULL);
     XSetForeground(dp, gc, bg);
@@ -286,7 +259,7 @@ static void setup(void)
     XFlush(dp);
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
     if (!(dp = XOpenDisplay(NULL)))
         printError("Cannot open display", true);
