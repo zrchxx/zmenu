@@ -1,5 +1,4 @@
 // zmenu - a small, simpler dmenu clone
-#include <X11/X.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +22,8 @@ static const char *BG = "#1d2021";
 static const char *BGH = "#b8bb26";
 // Foreground color
 static const char *FG = "#ebdbb2";
+// Foreground highlighted color
+static const char *FGH = "#1d2021";
 
 // Window width
 static const int WIDTH = 600;
@@ -56,7 +57,7 @@ static int selIndex = 0;
 // Xft
 static XftDraw *draw;
 static XftFont *font;
-static XftColor xftfg;
+static XftColor xftfg, xftfgh;
 
 
 //// CODE STARTS HERE ////
@@ -103,7 +104,7 @@ static void readStdin(void)
 
     for (int i = 0; (len = getline(&line, &lineSize, stdin)) != -1; i++)
     {
-        if (i < BUFSIZ - 1)
+        if (i != BUFSIZ - 1)
         {
             if (line[len - 1] == '\n')
                 line[len - 1] = '\0';
@@ -129,8 +130,18 @@ static void match(void)
     memset(itemsMatch, 0, sizeof(itemsMatch));
 
     for (int i = 0; items[i].text != NULL; i++)
-        if (!*searchText || strcasestr(items[i].text, searchText))
-            itemsMatch[j++] = items[i];
+    {
+        if (j != BUFSIZ - 1) 
+        {
+            if (!*searchText || strcasestr(items[i].text, searchText))
+                itemsMatch[j++] = items[i];
+        }
+        else 
+        {
+            itemsMatch[j].text = NULL;
+            break;
+        }
+    }
     selIndex = 0;
 }
 
@@ -142,7 +153,7 @@ static void drawMenu(void)
 
     texty = (HEIGHT + ((font->ascent + font->descent) / 2)) / 2;
     textx = (font->ascent + font->descent) / 4;
-    padding = 5;
+    padding = font->ascent - font->descent;
     
     XClearWindow(dp, win);
 
@@ -167,9 +178,14 @@ static void drawMenu(void)
         {
             XSetForeground(dp, gc, bgh);
             XFillRectangle(dp, win, gc, textx, 0, textWidht, HEIGHT);
+            XftDrawStringUtf8(draw, &xftfgh, font, textx + padding, texty, 
+                              (XftChar8 *)itemsMatch[i].text, strlen(itemsMatch[i].text));
         }
+        else 
+        {
             XftDrawStringUtf8(draw, &xftfg, font, textx + padding, texty, 
                               (XftChar8 *)itemsMatch[i].text, strlen(itemsMatch[i].text));
+        }
         textx += textWidht;
     }
     XFlush(dp);
@@ -200,6 +216,15 @@ static void keysHandler(void)
                 inputBuffer[--inputLen] = '\0';
                 match();
             }
+            break;
+        case XK_Tab:
+            if (itemsMatch[0].text == NULL)
+                break;
+
+            if (itemsMatch[selIndex + 1].text != NULL) 
+                selIndex++;
+            else
+                selIndex = 0;
             break;
         default:
             if (strlen(buf) == 1 && inputLen < sizeof(inputBuffer) - 1)
@@ -250,8 +275,14 @@ static void setup(void)
     if (!(font = XftFontOpenName(dp, sc, FONT)))
         printError("Cannot load font", true);
 
-    draw = XftDrawCreate(dp, win, visual, colormap);
-    XftColorAllocName(dp, visual, colormap, FG, &xftfg);
+    if (!(draw = XftDrawCreate(dp, win, visual, colormap)))
+        printError("Cannot create Xft draw", true);
+    
+    if (!XftColorAllocName(dp, visual, colormap, FG, &xftfg))
+        printError("Cannot allocate FG Xft color", true);
+    
+    if (!XftColorAllocName(dp, visual, colormap, FGH, &xftfgh))
+        printError("Cannot allocate FGH Xft color", true);
 
     XMapRaised(dp, win);
     XGrabKeyboard(dp, rt, True, GrabModeAsync, GrabModeAsync, CurrentTime);
